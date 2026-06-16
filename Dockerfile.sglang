@@ -1,0 +1,16 @@
+FROM crpi-ko94zaos2i7ow88e.cn-hangzhou.personal.cr.aliyuncs.com/sxt-hub/docker-sglang:nightly-dev-20260303-145ae518
+
+# 更新 transformers 到最新源码版以支持 GLM-OCR
+RUN pip install --no-cache-dir git+https://github.com/huggingface/transformers.git
+
+# 通过极简的正则表达式直接修复 transformers 版本更新引入的语法冲突。
+# 这样不仅绝对不会下载几十个 G 的底层 CUDA 包，也能完美绕开 flashinfer 的严格版本校验限制。
+RUN sed -i -e 's/vision_config: DeepseekVLVisionConfig/vision_config: DeepseekVLVisionConfig = None/g' \
+           -e 's/projector_config: DeepseekVLProjectorConfig/projector_config: DeepseekVLProjectorConfig = None/g' \
+           -e 's/language_config: DeepseekV2Config/language_config: DeepseekV2Config = None/g' \
+           /usr/local/lib/python3.12/dist-packages/sglang/srt/configs/deepseekvl2.py || true
+
+RUN sed -i -e 's/vision_config: DeepseekVLVisionConfig/vision_config: DeepseekVLVisionConfig = None/g' \
+           -e 's/projector_config: DeepseekVLProjectorConfig/projector_config: DeepseekVLProjectorConfig = None/g' \
+           -e 's/language_config: DeepseekV2Config/language_config: DeepseekV2Config = None/g' \
+           /sgl-workspace/sglang/python/sglang/srt/configs/deepseekvl2.py || true

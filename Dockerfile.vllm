@@ -1,0 +1,7 @@
+FROM crpi-ko94zaos2i7ow88e.cn-hangzhou.personal.cr.aliyuncs.com/sxt-hub/docker-vllm:vllm-nightly
+
+# 安装 git 以便能从 github 拉取最新代码
+RUN apt-get update && apt-get install -y git
+
+# 仅更新 transformers 到最新源码版 (vLLM对这种更新更宽容，通常不会引发框架本身的 import 崩溃)
+RUN pip install --no-cache-dir git+https://github.com/huggingface/transformers.git
