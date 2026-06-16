@@ -1,0 +1,9 @@
+mineru_integration/transformers/
+mineru_integration/__pycache__/
+__pycache__/
+*.png
+*.jpg
+*.jpeg
+*.pdf
+ocr_results/
+scratch/
