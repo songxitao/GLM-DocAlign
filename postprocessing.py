@@ -274,13 +274,12 @@ def process_grounded_markdown(md_path: Path, original_image_path: Path, output_d
     content = md_path.read_text(encoding="utf-8")
     original_image = Image.open(original_image_path)
     width_orig, height_orig = original_image.size
-    image_counter = 1
+    counters = {"image": 1, "table": 1, "chart": 1}
     
     # 正则：支持两种格式
     pattern = re.compile(r"(?:<\|ref\|>)?([a-zA-Z_]+)(?:<\|/ref\|>)?(?:<\|det\|>)?(\[\[(\d+(?:,\s*\d+){3})\]\])(?:<\|/det\|>)?")
 
     def replacement_func(match):
-        nonlocal image_counter
         tag_type = match.group(1).lower()
         coords_str = match.group(2)
         
@@ -289,7 +288,15 @@ def process_grounded_markdown(md_path: Path, original_image_path: Path, output_d
         if not nums or len(nums) < 4: return ""
         coords = [int(x) for x in nums[:4]] # 确保只取前4个
 
-        if "image" in tag_type and "caption" not in tag_type:
+        clean_tag = None
+        if "image" in tag_type and "caption" not in tag_type and "footnote" not in tag_type:
+            clean_tag = "image"
+        elif "table" in tag_type and "caption" not in tag_type and "footnote" not in tag_type:
+            clean_tag = "table"
+        elif "chart" in tag_type and "caption" not in tag_type and "footnote" not in tag_type:
+            clean_tag = "chart"
+
+        if clean_tag:
             try:
                 x1 = int(coords[0] / NORMALIZATION_FACTOR * width_orig)
                 y1 = int(coords[1] / NORMALIZATION_FACTOR * height_orig)
@@ -300,10 +307,11 @@ def process_grounded_markdown(md_path: Path, original_image_path: Path, output_d
                 
                 if x2 > x1 and y2 > y1:
                     cropped = original_image.crop((x1, y1, x2, y2))
-                    image_filename = f"{original_image_path.stem}_img_{image_counter}.png"
+                    idx = counters[clean_tag]
+                    image_filename = f"{original_image_path.stem}_{clean_tag}_{idx}.png"
                     cropped.save(images_subdir / image_filename)
-                    image_counter += 1
-                    return f"\n\n![{tag_type}](images/{image_filename})\n\n"
+                    counters[clean_tag] += 1
+                    return f"\n\n![{clean_tag}](images/{image_filename})\n\n"
             except Exception: return ""
         return "" # 删除标签
 
@@ -321,7 +329,7 @@ def create_diagnosis_image(md_path: Path, original_image_path: Path, output_dir:
     diagnosis_subdir = output_dir / "diagnosis"; diagnosis_subdir.mkdir(exist_ok=True)
     try:
         content = md_path.read_text(encoding="utf-8"); image_copy = Image.open(original_image_path).convert("RGBA"); draw = ImageDraw.Draw(image_copy); width_orig, height_orig = image_copy.size
-        colors = {"image": "red", "title": "blue", "sub_title": "purple", "text": "green", "default": "yellow"}
+        colors = {"image": "red", "table": "blue", "chart": "orange", "title": "blue", "sub_title": "purple", "text": "green", "default": "yellow"}
         pattern = re.compile(r"(?:<\|ref\|>)?([a-zA-Z_]+)(?:<\|/ref\|>)?(?:<\|det\|>)?(\[\[(\d+(?:,\s*\d+){3})\]\])(?:<\|/det\|>)?")
         for match in pattern.finditer(content):
             tag_type = match.group(1).lower(); 
@@ -330,7 +338,14 @@ def create_diagnosis_image(md_path: Path, original_image_path: Path, output_dir:
             coords = [int(x) for x in nums[:4]]
             try:
                 x1 = int(coords[0] / NORMALIZATION_FACTOR * width_orig); y1 = int(coords[1] / NORMALIZATION_FACTOR * height_orig); x2 = int(coords[2] / NORMALIZATION_FACTOR * width_orig); y2 = int(coords[3] / NORMALIZATION_FACTOR * height_orig)
-                color = colors.get(tag_type, colors["default"]); draw.rectangle([x1, y1, x2, y2], outline=color, width=3)
+                clean_tag = tag_type
+                if "image" in tag_type and "caption" not in tag_type and "footnote" not in tag_type:
+                    clean_tag = "image"
+                elif "table" in tag_type and "caption" not in tag_type and "footnote" not in tag_type:
+                    clean_tag = "table"
+                elif "chart" in tag_type and "caption" not in tag_type and "footnote" not in tag_type:
+                    clean_tag = "chart"
+                color = colors.get(clean_tag, colors.get(tag_type, colors["default"])); draw.rectangle([x1, y1, x2, y2], outline=color, width=3)
             except: continue
         image_copy.save(diagnosis_subdir / f"{original_image_path.stem}_diagnosis.png")
     except Exception: pass
