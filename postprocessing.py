@@ -26,6 +26,23 @@ def is_sentence_end(char):
     """判断是否为句末标点 (中英文)"""
     return char in {'.', '!', '?', '。', '！', '？', '…', '”', '"'}
 
+# 注册连字符字符集
+LINE_END_HYPHEN_CHARS = "-\u00ad\u2010\u2011\u2043"
+
+def full_to_half_exclude_marks(text: str) -> str:
+    """
+    仅转换 FF21-FF3A (全角大写 A-Z), FF41-FF5A (全角小写 a-z), FF10-FF19 (全角数字 0-9) 范围内的字符。
+    其他字符（如公式符号 ＋, ＝，标点 ！）保持原样。
+    """
+    res = []
+    for char in text:
+        code = ord(char)
+        if (0xFF10 <= code <= 0xFF19) or (0xFF21 <= code <= 0xFF3A) or (0xFF41 <= code <= 0xFF5A):
+            res.append(chr(code - 0xfee0))
+        else:
+            res.append(char)
+    return "".join(res)
+
 # --- 1. 单页重排 (保守版 + 中文优化) ---
 def smart_reflow_markdown(text):
     """
@@ -79,15 +96,20 @@ def smart_reflow_markdown(text):
             should_merge = False
             merge_sep = " " # 默认英文空格
 
-            # 情况 A: 英文合并 (非句号结尾 + 小写开头)
-            if not is_sentence_end(prev_char) and curr_char.islower():
-                should_merge = True
-            
-            # 情况 B: 连字符合并 (connec- tion)
-            elif prev_char == "-":
+            # 情况 B: 连字符合并 (如 connec- tion, 能够拼合 5 种连字符)
+            if prev_char in LINE_END_HYPHEN_CHARS:
                 should_merge = True
                 merge_sep = ""
-                buffer = buffer.strip()[:-1] # 去掉连字符
+                # 去除行尾所有的连字符字符，同时保留前导空白
+                stripped_buf = buffer.strip()
+                while stripped_buf and stripped_buf[-1] in LINE_END_HYPHEN_CHARS:
+                    stripped_buf = stripped_buf[:-1]
+                leading_spaces = buffer[:len(buffer) - len(buffer.lstrip())]
+                buffer = leading_spaces + stripped_buf
+
+            # 情况 A: 英文合并 (非句号结尾 + 小写开头)
+            elif not is_sentence_end(prev_char) and curr_char.islower():
+                should_merge = True
 
             # 情况 C: ✨ 中文合并 (汉字结尾 + 汉字开头)
             elif is_cjk(prev_char) and is_cjk(curr_char):
@@ -131,8 +153,12 @@ def stitch_pages(pages_content):
         # --- 缝合逻辑 ---
         
         # 1. 英文连字符
-        if prev_end == "-":
-            final_text = final_text.strip()[:-1] + page_text.strip()
+        if prev_end in LINE_END_HYPHEN_CHARS:
+            # 去除前一页末尾所有的连字符
+            stripped_text = final_text.rstrip()
+            while stripped_text and stripped_text[-1] in LINE_END_HYPHEN_CHARS:
+                stripped_text = stripped_text[:-1]
+            final_text = stripped_text + page_text.strip()
             
         # 2. 英文句子跨页 (非句号 + 小写)
         elif (prev_end.isalpha() or prev_end == ",") and curr_start.islower():
