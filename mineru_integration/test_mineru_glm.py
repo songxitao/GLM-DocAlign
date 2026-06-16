@@ -7,7 +7,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 class TestMineruGlm(unittest.TestCase):
     def test_map_and_normalize_box_formula(self):
-        from mineru_glm import map_and_normalize_box
+        from mineru_vl_utils import map_and_normalize_box
         # Test input pixel coordinates [100, 200, 300, 400], image size 1000x1000
         # formula -> equation, normalized [0.1, 0.2, 0.3, 0.4]
         label, box = map_and_normalize_box('formula', [100, 200, 300, 400], 1000, 1000)
@@ -15,7 +15,7 @@ class TestMineruGlm(unittest.TestCase):
         self.assertEqual(box, [0.1, 0.2, 0.3, 0.4])
 
     def test_map_and_normalize_box_figure(self):
-        from mineru_glm import map_and_normalize_box
+        from mineru_vl_utils import map_and_normalize_box
         # Test input pixel coordinates [100, 200, 300, 400], image size 1000x1000
         # figure -> image, normalized [0.1, 0.2, 0.3, 0.4]
         label, box = map_and_normalize_box('figure', [100, 200, 300, 400], 1000, 1000)
