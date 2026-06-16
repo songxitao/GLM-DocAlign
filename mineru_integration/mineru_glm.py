@@ -4,12 +4,12 @@ import torch
 import importlib.util
 from PIL import Image
 
-# 1. 设置环境变量，指向本地运行的 GLM-OCR vLLM 服务器
+# 1. 设置环境变量，指向本地运行 of GLM-OCR vLLM 服务器
 # 这将覆盖 MinerU 对远程 VLM 服务器的 API 请求目标
 os.environ["MINERU_VL_SERVER"] = "http://127.0.0.1:8700"
 os.environ["MINERU_VL_API_KEY"] = "dummy_key"
 
-# 2. 动态挂载本地魔改版 transformers（包含 pp_doclayout_v3模型定义）
+# 2. 动态挂载本地魔改版 transformers（包含 pp_doclayout_v3 模型定义）
 # 这可以防止 mineru 环境下因 transformers 版本代差而无法识别 pp_doclayout_v3 架构的问题
 integration_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, integration_dir)
@@ -113,9 +113,9 @@ print("[Patch] 成功全面劫持 MinerUClient (layout_detect/aio_layout_detect/
 from mineru.cli.client import main
 
 if __name__ == "__main__":
-    # 动态将 --backend 默认参数追加到 argv 里，默认请求远程/本地的 VLM 服务
+    # 动态将 --backend 默认参数追加到 argv 里，默认使用混合 API 识别模式（本地 Layout + 远程 GLM-OCR）
     if not any(arg in sys.argv for arg in ['-b', '--backend']):
-        sys.argv.extend(['--backend', 'vlm-http-client'])
+        sys.argv.extend(['--backend', 'hybrid-http-client'])
         
     print("[GLM-OCR Integration] 正在以 GLM-OCR 集成模式启动 MinerU CLI ...")
     main()
