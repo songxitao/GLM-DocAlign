@@ -11,7 +11,13 @@ from pipeline.async_ocr import run_async_ocr
 
 LOCAL_LAYOUT_MODEL = r"E:\project\GLM-OCR\model\PP-DocLayoutV3safetensor"
 
-def run_pipeline_flow(image_path: str, output_dir: str) -> str:
+def run_pipeline_flow(
+    image_path: str,
+    output_dir: str,
+    page_idx: int = 0,
+    table_as_image: bool = True,
+    formula_as_image: bool = False
+) -> tuple[str, dict]:
     os.makedirs(output_dir, exist_ok=True)
     images_subdir = os.path.join(output_dir, "images")
     os.makedirs(images_subdir, exist_ok=True)
@@ -41,7 +47,7 @@ def run_pipeline_flow(image_path: str, output_dir: str) -> str:
             boxes.append({"coords": box_coords, "label": label})
             
     if not boxes:
-        return "⚠️ 未检测到任何版面框。"
+        return "⚠️ 未检测到任何版面框。", {"page_idx": page_idx, "page_size": list(corrected_image.size), "blocks": []}
         
     # 绘制画框诊断图并保存（以当前页面文件名命名，防止覆盖）
     from PIL import ImageDraw
@@ -80,6 +86,8 @@ def run_pipeline_flow(image_path: str, output_dir: str) -> str:
     # 4. 裁剪并生成处理列表
     final_elements = [] 
     fig_counter = 1
+    table_counter = 1
+    formula_counter = 1
     
     for idx in sorted_indices:
         element = boxes[idx]
@@ -90,34 +98,69 @@ def run_pipeline_flow(image_path: str, output_dir: str) -> str:
             # 页眉页脚噪声直接过滤，不进入 OCR 识别与拼接，保证 Word 排版纯净度
             continue
             
+        is_crop = False
+        clean_tag = ""
+        markdown_label = ""
+        counter = 0
+        
         if lbl_lower in ["figure", "image", "chart"]:
-            # 插图直接裁剪保存（带页码前缀防止跨页覆盖冲突）
-            filename = f"{page_stem}_fig_{fig_counter}.png"
+            is_crop = True
+            clean_tag = "fig"
             markdown_label = "figure"
-                
+            counter = fig_counter
+            fig_counter += 1
+        elif lbl_lower == "table" and table_as_image:
+            is_crop = True
+            clean_tag = "table"
+            markdown_label = "table"
+            counter = table_counter
+            table_counter += 1
+        elif lbl_lower == "formula" and formula_as_image:
+            is_crop = True
+            clean_tag = "formula"
+            markdown_label = "formula"
+            counter = formula_counter
+            formula_counter += 1
+            
+        if is_crop:
+            # 物理裁剪保存
+            filename = f"{page_stem}_{clean_tag}_{counter}.png"
             fig_path = os.path.join(images_subdir, filename)
             cropped_fig = corrected_image.crop(element["coords"])
             cropped_fig.save(fig_path)
             
-            # 智能图片尺寸控制：计算检测框在页面中的相对宽度占比，自适应注入 Pandoc 尺寸属性
-            page_width = corrected_image.size[0]
-            box_coords = element["coords"]
-            box_width = box_coords[2] - box_coords[0]
-            ratio = float(box_width) / page_width
-            
-            if ratio >= 0.65:
-                width_str = "{width=100%}"
-            elif ratio >= 0.35:
-                width_str = "{width=70%}"
-            else:
-                width_str = "{width=45%}"
+            # 自适应图片尺寸控制：计算检测框在页面中的相对宽度占比，自适应注入 Pandoc 尺寸属性
+            width_str = ""
+            if clean_tag in ["fig", "table"]:
+                page_width = corrected_image.size[0]
+                box_coords = element["coords"]
+                box_width = box_coords[2] - box_coords[0]
+                ratio = float(box_width) / page_width
                 
-            final_elements.append({"type": "markdown", "content": f"\n\n![{markdown_label}](images/{filename}){width_str}\n\n"})
-            fig_counter += 1
+                if ratio >= 0.65:
+                    width_str = "{width=100%}"
+                elif ratio >= 0.35:
+                    width_str = "{width=70%}"
+                else:
+                    width_str = "{width=45%}"
+            
+            markdown_content = f"\n\n![{markdown_label}](images/{filename}){width_str}\n\n"
+            final_elements.append({
+                "type": "image_block",
+                "label": label,
+                "bbox": element["coords"],
+                "image_path": f"images/{filename}",
+                "markdown_content": markdown_content
+            })
         else:
             # 文本、公式、表格、摘要等：裁剪去噪并送入 OCR 推理
             cropped_sub = crop_and_mask(corrected_image, boxes, idx)
-            final_elements.append({"type": "ocr_task", "label": label, "image": cropped_sub})
+            final_elements.append({
+                "type": "ocr_task",
+                "label": label,
+                "bbox": element["coords"],
+                "image": cropped_sub
+            })
             
     # 5. 提取需要 OCR 的子图片并进行异步并发识别
     ocr_images_info = [
@@ -129,12 +172,24 @@ def run_pipeline_flow(image_path: str, output_dir: str) -> str:
     if ocr_images_info:
         ocr_texts = asyncio.run(run_async_ocr(ocr_images_info, concurrency=4))
         
-    # 6. 将结果拼装为 Markdown
+    # 6. 将结果拼装为 Markdown 并构造 Middle JSON 数据
+    page_middle_data = {
+        "page_idx": page_idx,
+        "page_size": list(corrected_image.size),  # [width, height]
+        "blocks": []
+    }
+    
     ocr_idx = 0
     markdown_lines = []
     for el in final_elements:
-        if el["type"] == "markdown":
-            markdown_lines.append(el["content"])
+        if el["type"] == "image_block":
+            markdown_lines.append(el["markdown_content"])
+            block = {
+                "type": el["label"].lower(),
+                "bbox": el["bbox"],
+                "image_path": el["image_path"]
+            }
+            page_middle_data["blocks"].append(block)
         elif el["type"] == "ocr_task":
             # 兼容 mock 出来的长度不一致，或者出现异常的情况
             if ocr_idx < len(ocr_texts):
@@ -172,9 +227,23 @@ def run_pipeline_flow(image_path: str, output_dir: str) -> str:
                 else:
                     # 兜底普通文本：确保前后换行保护，防止折行变为软回车
                     markdown_lines.append(f"\n\n{txt}\n\n")
+                
+                block = {
+                    "type": el["label"].lower(),
+                    "bbox": el["bbox"],
+                    "content": txt
+                }
+                page_middle_data["blocks"].append(block)
             else:
-                markdown_lines.append(f"\n\n[OCR识别失败：索引溢出，标签为: {el['label']}]\n\n")
+                fail_msg = f"[OCR识别失败：索引溢出，标签为: {el['label']}]"
+                markdown_lines.append(f"\n\n{fail_msg}\n\n")
+                block = {
+                    "type": el["label"].lower(),
+                    "bbox": el["bbox"],
+                    "content": fail_msg
+                }
+                page_middle_data["blocks"].append(block)
             ocr_idx += 1
             
     full_markdown = "\n\n".join(markdown_lines)
-    return full_markdown
+    return full_markdown, page_middle_data
