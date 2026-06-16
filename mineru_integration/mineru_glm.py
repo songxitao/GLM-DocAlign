@@ -114,8 +114,9 @@ from mineru.cli.client import main
 
 if __name__ == "__main__":
     # 动态将 --backend 默认参数追加到 argv 里，默认使用混合 API 识别模式（本地 Layout + 远程 GLM-OCR）
+    # 动态将 --backend 默认参数追加到 argv 里，默认使用混合 API 识别模式（本地 Layout + 远程 GLM-OCR）
     if not any(arg in sys.argv for arg in ['-b', '--backend']):
-        sys.argv.extend(['--backend', 'hybrid-http-client'])
+        sys.argv.extend(['--backend', 'vlm-http-client'])
         
     print("[GLM-OCR Integration] 正在以 GLM-OCR 集成模式启动 MinerU CLI ...")
     main()
