@@ -9,7 +9,7 @@ from PIL import Image
 os.environ["MINERU_VL_SERVER"] = "http://127.0.0.1:8700"
 os.environ["MINERU_VL_API_KEY"] = "dummy_key"
 
-# 2. 动态挂载本地魔改版 transformers（包含 pp_doclayout_v3 模型定义）
+# 2. 动态挂载本地魔改版 transformers（包含 pp_doclayout_v3模型定义）
 # 这可以防止 mineru 环境下因 transformers 版本代差而无法识别 pp_doclayout_v3 架构的问题
 integration_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, integration_dir)
@@ -88,17 +88,28 @@ def my_batch_layout_detect(self, images, priority=None, scored=None):
         results.append(ExtractResult(blocks))
     return results
 
+# 5. 编写单页/异步的劫持逻辑，完全路由到已有的批量预测中
+def my_layout_detect(self, image, priority=None, scored=None):
+    results = my_batch_layout_detect(self, [image], priority, scored)
+    return results[0]
+
+async def my_aio_layout_detect(self, image, priority=None, semaphore=None, scored=None):
+    results = my_batch_layout_detect(self, [image], priority, scored)
+    return results[0]
+
 async def my_aio_batch_layout_detect(self, images, priority=None, semaphore=None, scored=None):
     # 异步版本的劫持，在 CPU 上同步跑完并直接返回
     return my_batch_layout_detect(self, images, priority, scored)
 
-# 5. 实施 Monkey Patch 劫持 MinerUClient
+# 6. 实施 Monkey Patch 劫持 MinerUClient 的全部 4 个版面预测入口
 from mineru_vl_utils import MinerUClient
+MinerUClient.layout_detect = my_layout_detect
+MinerUClient.aio_layout_detect = my_aio_layout_detect
 MinerUClient.batch_layout_detect = my_batch_layout_detect
 MinerUClient.aio_batch_layout_detect = my_aio_batch_layout_detect
-print("[Patch] 成功劫持 MinerUClient。版面分析已被接管至 PP-DocLayout-V3 (CPU 运行)。")
+print("[Patch] 成功全面劫持 MinerUClient (layout_detect/aio_layout_detect/batch_layout_detect/aio_batch_layout_detect)。")
 
-# 6. 调用 MinerU CLI 原版入口
+# 7. 调用 MinerU CLI 原版入口
 from mineru.cli.client import main
 
 if __name__ == "__main__":
