@@ -46,3 +46,20 @@ def test_masked_crop_upscale():
     # So the middle y (64) is within the white masked area
     pixel = cropped_np[cropped.size[1] // 2, cropped.size[0] - 15]
     assert np.mean(pixel) > 240
+
+def test_masked_crop_large_target_wipes_small_other():
+    # Target (large): [0, 0, 200, 200] (area 40000)
+    # Other (small): [80, 80, 100, 100] (area 400) -> < 50% of target area
+    img = Image.new("RGB", (300, 300), (0, 0, 0))
+    boxes = [
+        {"coords": [80, 80, 100, 100], "label": "text"},   # idx = 0 (small)
+        {"coords": [0, 0, 200, 200], "label": "table"}       # idx = 1 (large)
+    ]
+    cropped = crop_and_mask(img, boxes, target_idx=1)
+    cropped_np = np.array(cropped)
+    
+    # Coordinate (85, 85) is inside the small other box
+    # px1=0, py1=0, so local coordinates match original coordinates.
+    # It should be masked (white)
+    pixel = cropped_np[85, 85]
+    assert np.mean(pixel) > 240
