@@ -268,3 +268,110 @@ def run_pipeline_flow(
             
     full_markdown = "\n\n".join(markdown_lines)
     return full_markdown, page_middle_data
+
+
+from pathlib import Path
+from postprocessing import smart_reflow_markdown
+
+class StreamAssembler:
+    def __init__(self, output_dir, stem, total_pages):
+        self.output_dir = Path(output_dir)
+        self.stem = stem
+        self.total_pages = total_pages
+        self.page_buffers = {}
+        self.final_pdf_info = [None] * total_pages
+        self.current_writing_page = 0
+        self.lock = asyncio.Lock()
+        self.finished_event = asyncio.Event()
+        
+        self.output_md_path = self.output_dir / "final_output.md"
+        self.output_md_path.parent.mkdir(exist_ok=True, parents=True)
+        self.output_md_path.write_text("", encoding="utf-8")
+
+    async def register_page(self, page_idx, page_structure):
+        async with self.lock:
+            ocr_tasks_count = sum(1 for b in page_structure["blocks"] if b["type"] == "ocr_task")
+            self.page_buffers[page_idx] = {
+                "structure": page_structure,
+                "pending_ocr": ocr_tasks_count,
+                "ready": ocr_tasks_count == 0,
+                "filled_blocks": set()
+            }
+            await self.flush_ready_pages()
+
+    async def fill_ocr_content(self, page_idx, block_idx, content):
+        async with self.lock:
+            if page_idx not in self.page_buffers:
+                return
+            page = self.page_buffers[page_idx]
+            if block_idx in page["filled_blocks"]:
+                return
+            
+            matched = False
+            for block in page["structure"]["blocks"]:
+                if block.get("block_idx") == block_idx:
+                    block["content"] = content.replace("```", "")
+                    matched = True
+                    break
+            
+            if matched:
+                page["filled_blocks"].add(block_idx)
+                page["pending_ocr"] -= 1
+                if page["pending_ocr"] <= 0:
+                    page["ready"] = True
+                
+                await self.flush_ready_pages()
+
+    async def flush_ready_pages(self):
+        while self.current_writing_page in self.page_buffers:
+            page = self.page_buffers[self.current_writing_page]
+            if not page["ready"]:
+                break
+            
+            await self.write_page_to_disk(self.current_writing_page, page["structure"])
+            self.final_pdf_info[self.current_writing_page] = page["structure"]
+            del self.page_buffers[self.current_writing_page]
+            
+            self.current_writing_page += 1
+            if self.current_writing_page == self.total_pages:
+                self.finished_event.set()
+
+    def _write_file_sync(self, content):
+        with open(self.output_md_path, "a", encoding="utf-8") as f:
+            f.write(content)
+
+    async def write_page_to_disk(self, page_idx, structure):
+        markdown_lines = []
+        for block in structure["blocks"]:
+            if "content" in block:
+                txt = block["content"].strip()
+                lbl = block.get("label", "paragraph").lower()
+                if not txt:
+                    continue
+                reflowed = smart_reflow_markdown(txt)
+                
+                if lbl == "doc_title":
+                    markdown_lines.append(f"\n\n# {reflowed}\n\n")
+                elif lbl == "paragraph_title":
+                    markdown_lines.append(f"\n\n## {reflowed}\n\n")
+                elif lbl == "table":
+                    markdown_lines.append(f"\n\n{reflowed}\n\n")
+                elif lbl == "abstract":
+                    markdown_lines.append(f"\n\n> **Abstract** — {reflowed}\n\n")
+                elif lbl == "algorithm":
+                    markdown_lines.append(f"\n\n```\n{reflowed}\n```\n\n")
+                elif lbl == "figure_title":
+                    markdown_lines.append(f"\n\n*{reflowed}*\n\n")
+                else:
+                    markdown_lines.append(f"\n\n{reflowed}\n\n")
+            elif "image_path" in block:
+                lbl = block.get("label", "figure").lower()
+                markdown_lines.append(f"\n\n![{lbl}]({block['image_path']})\n\n")
+        
+        page_md = "\n\n".join(markdown_lines)
+        if page_idx > 0:
+            page_md = f"\n\n\\newpage\n\n{page_md}"
+            
+        await asyncio.to_thread(self._write_file_sync, page_md)
+
+

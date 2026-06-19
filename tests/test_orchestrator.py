@@ -37,3 +37,116 @@ class TestLayoutPredictor(unittest.TestCase):
         self.assertTrue(isinstance(result["scores"], torch.Tensor))
         self.assertTrue(isinstance(result["labels"], torch.Tensor))
         self.assertTrue(isinstance(result["boxes"], torch.Tensor))
+
+
+import tempfile
+import shutil
+import asyncio
+from pathlib import Path
+from pipeline.orchestrator import StreamAssembler
+
+class TestStreamAssembler(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir)
+
+    def test_assembler_order_preservation(self):
+        async def run_test():
+            assembler = StreamAssembler(self.temp_dir, "test_doc", total_pages=2)
+            
+            # 页 0 骨架（1个 OCR，1个直接截图块）
+            page_0 = {
+                "page_idx": 0,
+                "page_size": [100, 100],
+                "blocks": [
+                    {"block_idx": 0, "type": "ocr_task", "label": "text", "bbox": [0,0,10,10], "content": None},
+                    {"block_idx": 1, "type": "image_block", "label": "figure", "bbox": [10,10,20,20], "image_path": "images/test_0.png"}
+                ]
+            }
+            # 页 1 骨架（1个 OCR）
+            page_1 = {
+                "page_idx": 1,
+                "page_size": [100, 100],
+                "blocks": [
+                    {"block_idx": 0, "type": "ocr_task", "label": "text", "bbox": [0,0,10,10], "content": None}
+                ]
+            }
+            
+            # 1. 注册页 1
+            await assembler.register_page(1, page_1)
+            self.assertEqual(assembler.current_writing_page, 0)
+            
+            # 2. 注册页 0
+            await assembler.register_page(0, page_0)
+            self.assertEqual(assembler.current_writing_page, 0)
+            
+            # 3. 填充页 1 OCR（乱序返回）
+            await assembler.fill_ocr_content(1, 0, "Hello Page 1")
+            self.assertEqual(assembler.current_writing_page, 0)
+            
+            # 4. 填充页 0 OCR
+            await assembler.fill_ocr_content(0, 0, "Hello Page 0")
+            await asyncio.wait_for(assembler.finished_event.wait(), timeout=2.0)
+            self.assertEqual(assembler.current_writing_page, 2)
+            
+            # 验证写入的物理文件内容是否符合预期
+            output_md = Path(self.temp_dir) / "final_output.md"
+            self.assertTrue(output_md.exists())
+            content = output_md.read_text(encoding="utf-8")
+            self.assertIn("Hello Page 0", content)
+            self.assertIn("Hello Page 1", content)
+            
+        asyncio.run(run_test())
+
+    def test_assembler_idempotency_and_memory_clean(self):
+        async def run_test():
+            assembler = StreamAssembler(self.temp_dir, "test_doc", total_pages=1)
+            
+            # 页 0 骨架（2个 OCR 块）
+            page_0 = {
+                "page_idx": 0,
+                "page_size": [100, 100],
+                "blocks": [
+                    {"block_idx": 0, "type": "ocr_task", "label": "text", "bbox": [0,0,10,10], "content": None},
+                    {"block_idx": 1, "type": "ocr_task", "label": "text", "bbox": [10,10,20,20], "content": None}
+                ]
+            }
+            
+            # 注册页 0
+            await assembler.register_page(0, page_0)
+            self.assertEqual(assembler.page_buffers[0]["pending_ocr"], 2)
+            self.assertFalse(assembler.page_buffers[0]["ready"])
+            
+            # 1. 填充不存在的 block_idx (例如 99)，不发生状态扣减
+            await assembler.fill_ocr_content(0, 99, "No Match")
+            self.assertEqual(assembler.page_buffers[0]["pending_ocr"], 2)
+            self.assertFalse(assembler.page_buffers[0]["ready"])
+            
+            # 2. 填充 block 0，pending_ocr 减一
+            await assembler.fill_ocr_content(0, 0, "Hello 0")
+            self.assertEqual(assembler.page_buffers[0]["pending_ocr"], 1)
+            self.assertFalse(assembler.page_buffers[0]["ready"])
+            
+            # 3. 重复填充 block 0 (幂等保护测试)，pending_ocr 应保持为 1，且不应触发报错
+            await assembler.fill_ocr_content(0, 0, "Hello 0 Duplicate")
+            self.assertEqual(assembler.page_buffers[0]["pending_ocr"], 1)
+            self.assertFalse(assembler.page_buffers[0]["ready"])
+            
+            # 4. 填充 block 1，页面 ready，触发写盘
+            await assembler.fill_ocr_content(0, 1, "Hello 1")
+            await asyncio.wait_for(assembler.finished_event.wait(), timeout=2.0)
+            
+            # 验证内存清理：已写盘页面的 page_buffers 应该被删除
+            self.assertNotIn(0, assembler.page_buffers)
+            
+            # 验证 final_pdf_info 正确保存了页面结构
+            self.assertEqual(len(assembler.final_pdf_info), 1)
+            self.assertIsNotNone(assembler.final_pdf_info[0])
+            self.assertEqual(assembler.final_pdf_info[0]["blocks"][0]["content"], "Hello 0")
+            self.assertEqual(assembler.final_pdf_info[0]["blocks"][1]["content"], "Hello 1")
+            
+        asyncio.run(run_test())
+
+
