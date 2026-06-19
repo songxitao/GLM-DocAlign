@@ -38,4 +38,9 @@ def recursive_xy_cut(boxes, index_list, direction='X') -> list:
 
 def sort_boxes_by_xy_cut(boxes: list) -> list:
     initial_indices = list(range(len(boxes)))
+    # 智能自适应布局判定：若文档中包含 table 块（通常是账本、表单、报表），
+    # 强制优先从 Y 轴（从上到下）开始切分，防止其底部左右签字/右侧大标题被错误判定为分栏而乱序。
+    has_table = any(b.get("label", "").lower() == "table" for b in boxes)
+    if has_table:
+        return recursive_xy_cut(boxes, initial_indices, 'Y')
     return recursive_xy_cut(boxes, initial_indices, 'X')
