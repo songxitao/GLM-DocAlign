@@ -12,7 +12,7 @@ from pipeline.orchestrator import run_pipeline_flow
 def main():
     import json
     
-    # 提取并移除 --force 参数与 --ocr-table 参数
+    # 提取并移除 --force、--ocr-table、--keep-header-footer 参数
     force = "--force" in sys.argv
     if force:
         sys.argv.remove("--force")
@@ -20,9 +20,13 @@ def main():
     ocr_table = "--ocr-table" in sys.argv
     if ocr_table:
         sys.argv.remove("--ocr-table")
+        
+    keep_header_footer = "--keep-header-footer" in sys.argv
+    if keep_header_footer:
+        sys.argv.remove("--keep-header-footer")
 
     if len(sys.argv) < 2:
-        print("📢 用法: python run_pipeline.py <PDF路径或图片路径> [输出目录] [--force] [--ocr-table]")
+        print("📢 用法: python run_pipeline.py <PDF路径或图片路径> [输出目录] [--force] [--ocr-table] [--keep-header-footer]")
         sys.exit(1)
         
     input_path = Path(sys.argv[1])
@@ -151,7 +155,7 @@ def main():
     for idx, img_path in enumerate(img_files):
         print(f"🧠 正在分析并识别页面: {img_path.name}...")
         # 正确解包返回的 (page_md, page_middle_data)
-        page_md, page_middle_data = run_pipeline_flow(str(img_path), str(output_dir), page_idx=idx, table_as_image=not ocr_table)
+        page_md, page_middle_data = run_pipeline_flow(str(img_path), str(output_dir), page_idx=idx, table_as_image=not ocr_table, keep_header_footer=keep_header_footer)
         
         # 3. 对单页内容运行 smart_reflow_markdown 优化换行
         reflowed_md = smart_reflow_markdown(page_md)

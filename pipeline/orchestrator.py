@@ -16,7 +16,8 @@ def run_pipeline_flow(
     output_dir: str,
     page_idx: int = 0,
     table_as_image: bool = True,
-    formula_as_image: bool = False
+    formula_as_image: bool = False,
+    keep_header_footer: bool = False
 ) -> tuple[str, dict]:
     os.makedirs(output_dir, exist_ok=True)
     images_subdir = os.path.join(output_dir, "images")
@@ -94,11 +95,13 @@ def run_pipeline_flow(
         label = element["label"]
         lbl_lower = label.lower()
         
-        # 智能页眉过滤：如果是单栏表格账单（有 table），页眉通常是重要的“要货单位”、“发票抬头”等，不能丢弃。
-        # 我们只在普通学术文档（无 table）中才过滤 header，在账本中予以保留。
-        has_table = any(b["label"].lower() == "table" for b in boxes)
-        if lbl_lower == "footer" or (lbl_lower == "header" and not has_table):
-            continue
+        # 页眉页脚过滤控制
+        if not keep_header_footer:
+            # 智能页眉过滤：如果是单栏表格账单（有 table），页眉通常是重要的“要货单位”、“发票抬头”等，不能丢弃。
+            # 我们只在普通学术文档（无 table）中才过滤 header，在账本中予以保留。
+            has_table = any(b["label"].lower() == "table" for b in boxes)
+            if lbl_lower == "footer" or (lbl_lower == "header" and not has_table):
+                continue
             
         is_crop = False
         clean_tag = ""
