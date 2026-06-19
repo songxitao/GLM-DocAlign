@@ -1,6 +1,9 @@
 import os
 import sys
 import asyncio
+import time
+import requests
+import subprocess
 from pathlib import Path
 from preprocessing import convert_pdf_to_images
 from postprocessing import smart_reflow_markdown, convert_file_with_pandoc
@@ -9,13 +12,17 @@ from pipeline.orchestrator import run_pipeline_flow
 def main():
     import json
     
-    # 提取并移除 --force 参数
+    # 提取并移除 --force 参数与 --ocr-table 参数
     force = "--force" in sys.argv
     if force:
         sys.argv.remove("--force")
+        
+    ocr_table = "--ocr-table" in sys.argv
+    if ocr_table:
+        sys.argv.remove("--ocr-table")
 
     if len(sys.argv) < 2:
-        print("📢 用法: python run_pipeline.py <PDF路径或图片路径> [输出目录] [--force]")
+        print("📢 用法: python run_pipeline.py <PDF路径或图片路径> [输出目录] [--force] [--ocr-table]")
         sys.exit(1)
         
     input_path = Path(sys.argv[1])
@@ -33,6 +40,43 @@ def main():
         
     middle_json_path = output_dir / f"{stem}_middle.json"
     
+    # --- 增加本地 GLM-OCR API 服务自检与自启动 ---
+    # 如果用户没有传递缓存渲染（或者缓存未命中），则必须确保 VLM 接口是在线状态
+    needs_api = not (middle_json_path.exists() and not force)
+    if needs_api:
+        vllm_api_url = "http://127.0.0.1:8700/v1/models"
+        try:
+            # 探测本地 API 服务是否在线
+            requests.get(vllm_api_url, timeout=2)
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
+            print("⚠️  提示: 检测到本地 GLM-OCR 大模型 API 服务（8700端口）处于未开启状态！")
+            print("🔄 正在尝试自动为您拉起本地 Docker 容器大模型后台 (start_glmocr.bat)...")
+            try:
+                # 弹出新控制台，执行 start_glmocr.bat
+                subprocess.Popen(["start_glmocr.bat"], shell=True, creationflags=subprocess.CREATE_NEW_CONSOLE)
+                
+                print("⏳ 正在等待大模型加载就绪（一般约需 20-40 秒，可在新弹出的窗口查看进度）...")
+                max_retries = 30
+                started = False
+                for retry in range(max_retries):
+                    time.sleep(3)
+                    try:
+                        resp = requests.get(vllm_api_url, timeout=2)
+                        if resp.status_code == 200:
+                            print("🎉 GLM-OCR 本地服务加载成功！继续执行解析...")
+                            started = True
+                            break
+                    except Exception:
+                        pass
+                    print(f"   [等待中] 已检测 { (retry + 1) * 3 } 秒...")
+                
+                if not started:
+                    print("❌ 等待服务启动超时。请确保您的 Docker 环境已启动且 GPU 资源未被占用。")
+                    sys.exit(1)
+            except Exception as start_err:
+                print(f"❌ 自动拉起服务失败: {start_err}。请手动运行 start_glmocr.bat 确认服务启动后再试。")
+                sys.exit(1)
+
     # 3. 改造缓存命中后的本地免 API 渲染逻辑
     if middle_json_path.exists() and not force:
         print("📢 检测到本地缓存，正在直接渲染 Markdown 与 Word，无需调用 VLM API...")
@@ -107,7 +151,7 @@ def main():
     for idx, img_path in enumerate(img_files):
         print(f"🧠 正在分析并识别页面: {img_path.name}...")
         # 正确解包返回的 (page_md, page_middle_data)
-        page_md, page_middle_data = run_pipeline_flow(str(img_path), str(output_dir), page_idx=idx)
+        page_md, page_middle_data = run_pipeline_flow(str(img_path), str(output_dir), page_idx=idx, table_as_image=not ocr_table)
         
         # 3. 对单页内容运行 smart_reflow_markdown 优化换行
         reflowed_md = smart_reflow_markdown(page_md)
