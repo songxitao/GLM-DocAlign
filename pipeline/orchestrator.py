@@ -94,8 +94,10 @@ def run_pipeline_flow(
         label = element["label"]
         lbl_lower = label.lower()
         
-        if lbl_lower in ["header", "footer"]:
-            # 页眉页脚噪声直接过滤，不进入 OCR 识别与拼接，保证 Word 排版纯净度
+        # 智能页眉过滤：如果是单栏表格账单（有 table），页眉通常是重要的“要货单位”、“发票抬头”等，不能丢弃。
+        # 我们只在普通学术文档（无 table）中才过滤 header，在账本中予以保留。
+        has_table = any(b["label"].lower() == "table" for b in boxes)
+        if lbl_lower == "footer" or (lbl_lower == "header" and not has_table):
             continue
             
         is_crop = False
