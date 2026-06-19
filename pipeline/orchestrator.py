@@ -10,6 +10,22 @@ from pipeline.masked_crop import crop_and_mask
 from pipeline.async_ocr import run_async_ocr
 
 LOCAL_LAYOUT_MODEL = r"E:\project\GLM-OCR\model\PP-DocLayoutV3safetensor"
+_global_predictor = None
+
+
+class LayoutPredictor:
+    def __init__(self, model_dir: str):
+        self.model = AutoModelForObjectDetection.from_pretrained(model_dir).to("cpu")
+        self.image_processor = AutoImageProcessor.from_pretrained(model_dir)
+
+    def predict(self, corrected_image):
+        inputs = self.image_processor(images=corrected_image, return_tensors="pt").to("cpu")
+        with torch.no_grad():
+            outputs = self.model(**inputs)
+        return self.image_processor.post_process_object_detection(
+            outputs, target_sizes=[corrected_image.size[::-1]]
+        )
+
 
 def run_pipeline_flow(
     image_path: str,
@@ -17,7 +33,8 @@ def run_pipeline_flow(
     page_idx: int = 0,
     table_as_image: bool = True,
     formula_as_image: bool = False,
-    keep_header_footer: bool = False
+    keep_header_footer: bool = False,
+    predictor: LayoutPredictor = None
 ) -> tuple[str, dict]:
     os.makedirs(output_dir, exist_ok=True)
     images_subdir = os.path.join(output_dir, "images")
@@ -28,22 +45,21 @@ def run_pipeline_flow(
     angle = detect_skew_angle(raw_image)
     corrected_image = rotate_image(raw_image, -angle)
     
-    # 2. 本地加载版面检测模型并推理
-    model = AutoModelForObjectDetection.from_pretrained(LOCAL_LAYOUT_MODEL).to("cpu")
-    image_processor = AutoImageProcessor.from_pretrained(LOCAL_LAYOUT_MODEL)
-    
-    inputs = image_processor(images=corrected_image, return_tensors="pt").to("cpu")
-    with torch.no_grad():
-        outputs = model(**inputs)
-        
-    results = image_processor.post_process_object_detection(outputs, target_sizes=[corrected_image.size[::-1]])
+    # 2. 版面检测模型推理
+    if predictor is None:
+        global _global_predictor
+        if _global_predictor is None:
+            _global_predictor = LayoutPredictor(LOCAL_LAYOUT_MODEL)
+        predictor = _global_predictor
+
+    results = predictor.predict(corrected_image)
     
     boxes = []
     for result in results:
         for score, label_id, box in zip(result["scores"], result["labels"], result["boxes"]):
             if score.item() < 0.4:
                 continue
-            label = model.config.id2label.get(label_id.item(), f"Label_{label_id.item()}")
+            label = predictor.model.config.id2label.get(label_id.item(), f"Label_{label_id.item()}")
             box_coords = [int(i) for i in box.tolist()]
             boxes.append({"coords": box_coords, "label": label})
             
