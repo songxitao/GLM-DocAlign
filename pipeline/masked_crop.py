@@ -21,6 +21,15 @@ def crop_and_mask(image: Image.Image, boxes: list, target_idx: int) -> Image.Ima
     cropped = image.crop((px1, py1, px2, py2))
     draw = ImageDraw.Draw(cropped)
     
+    # Local coordinates of the target core box
+    cx1 = xmin - px1
+    cy1 = ymin - py1
+    cx2 = xmax - px1
+    cy2 = ymax - py1
+    
+    pw = px2 - px1
+    ph = py2 - py1
+    
     # Mask out neighboring elements
     for idx, other in enumerate(boxes):
         if idx == target_idx:
@@ -38,7 +47,27 @@ def crop_and_mask(image: Image.Image, boxes: list, target_idx: int) -> Image.Ima
             local_y1 = iy1 - py1
             local_x2 = ix2 - px1
             local_y2 = iy2 - py1
-            draw.rectangle([local_x1, local_y1, local_x2, local_y2], fill=(255, 255, 255))
+            
+            # Subdivide mask into 4 quadrants around the core box to avoid overwriting inside the core box
+            # 1. Left padding region: (0, 0, cx1, ph)
+            lx1, ly1, lx2, ly2 = max(local_x1, 0), max(local_y1, 0), min(local_x2, cx1), min(local_y2, ph)
+            if lx2 > lx1 and ly2 > ly1:
+                draw.rectangle([lx1, ly1, lx2, ly2], fill=(255, 255, 255))
+            
+            # 2. Right padding region: (cx2, 0, pw, ph)
+            rx1, ry1, rx2, ry2 = max(local_x1, cx2), max(local_y1, 0), min(local_x2, pw), min(local_y2, ph)
+            if rx2 > rx1 and ry2 > ry1:
+                draw.rectangle([rx1, ry1, rx2, ry2], fill=(255, 255, 255))
+                
+            # 3. Top padding region: (0, 0, pw, cy1)
+            tx1, ty1, tx2, ty2 = max(local_x1, 0), max(local_y1, 0), min(local_x2, pw), min(local_y2, cy1)
+            if tx2 > tx1 and ty2 > ty1:
+                draw.rectangle([tx1, ty1, tx2, ty2], fill=(255, 255, 255))
+                
+            # 4. Bottom padding region: (0, cy2, pw, ph)
+            bx1, by1, bx2, by2 = max(local_x1, 0), max(local_y1, cy2), min(local_x2, pw), min(local_y2, ph)
+            if bx2 > bx1 and by2 > by1:
+                draw.rectangle([bx1, by1, bx2, by2], fill=(255, 255, 255))
             
     # Resize upscale if height is less than 64px
     new_h = py2 - py1

@@ -14,9 +14,22 @@ def test_masked_crop_logic():
     
     assert cropped.size[1] >= 64
     cropped_np = np.array(cropped)
-    # The right-bottom overlapping area in cropped image should be filled with white (255)
-    pixel = cropped_np[cropped.size[1] - 10, cropped.size[0] - 10]
-    assert np.mean(pixel) > 240
+    
+    # 1. Target core area should be protected and remain black (mean < 10)
+    # Coordinate (80, 80) in local space is within target core (xmin=20, ymin=20 -> local xmin=6, local ymin=6)
+    # and cx2=86, cy2=86. So (80, 80) is inside target core box and should be black.
+    core_pixel = cropped_np[80, 80]
+    assert np.mean(core_pixel) < 10
+    
+    # 2. Right padding area overlaps with the other box (local x > 86, local y < 86, e.g., (90, 80))
+    # It should be masked (white)
+    right_pad_pixel = cropped_np[80, 90]  # numpy array is indexed [y, x]
+    assert np.mean(right_pad_pixel) > 240
+    
+    # 3. Bottom padding area overlaps with the other box (local x < 86, local y > 86, e.g., (80, 90))
+    # It should be masked (white)
+    bottom_pad_pixel = cropped_np[90, 80]  # numpy array is indexed [y, x]
+    assert np.mean(bottom_pad_pixel) > 240
 
 def test_masked_crop_upscale():
     img = Image.new("RGB", (300, 300), (0, 0, 0))
