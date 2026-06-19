@@ -40,6 +40,7 @@ async def ocr_single_image(session: aiohttp.ClientSession, img_path_or_pil, labe
         max_tokens = 1024
         if label.lower() == "table":
             prompt = "Table Recognition:"
+            max_tokens = 4096
         elif label.lower() == "formula":
             prompt = "Formula Recognition:"
             max_tokens = 256
