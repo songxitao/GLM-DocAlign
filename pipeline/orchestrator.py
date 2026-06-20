@@ -7,7 +7,7 @@ from transformers import AutoImageProcessor, AutoModelForObjectDetection
 from pipeline.deskew import detect_skew_angle, rotate_image
 from pipeline.xycut import sort_boxes_by_xy_cut
 from pipeline.masked_crop import crop_and_mask
-from pipeline.async_ocr import run_async_ocr
+from pipeline.async_ocr import run_async_ocr, ocr_single_image
 
 LOCAL_LAYOUT_MODEL = r"E:\project\GLM-OCR\model\PP-DocLayoutV3safetensor"
 _global_predictor = None
@@ -366,12 +366,272 @@ class StreamAssembler:
                     markdown_lines.append(f"\n\n{reflowed}\n\n")
             elif "image_path" in block:
                 lbl = block.get("label", "figure").lower()
-                markdown_lines.append(f"\n\n![{lbl}]({block['image_path']})\n\n")
+                width_str = block.get("width_str", "")
+                markdown_lines.append(f"\n\n![{lbl}]({block['image_path']}){width_str}\n\n")
         
         page_md = "\n\n".join(markdown_lines)
         if page_idx > 0:
             page_md = f"\n\n\\newpage\n\n{page_md}"
-            
         await asyncio.to_thread(self._write_file_sync, page_md)
+
+
+def process_single_page_layout(
+    image_path: str,
+    page_idx: int,
+    predictor: LayoutPredictor,
+    output_dir: str,
+    keep_header_footer: bool = False,
+    table_as_image: bool = True,
+    formula_as_image: bool = False
+) -> tuple[dict, list]:
+    raw_image = Image.open(image_path).convert("RGB")
+    angle = detect_skew_angle(raw_image)
+    corrected_image = rotate_image(raw_image, -angle)
+    
+    results = predictor.predict(corrected_image)
+    
+    boxes = []
+    for result in results:
+        if not all(k in result for k in ["scores", "labels", "boxes"]):
+            continue
+        for score, label_id, box in zip(result["scores"], result["labels"], result["boxes"]):
+            if score.item() < 0.4:
+                continue
+            label = predictor.model.config.id2label.get(label_id.item(), f"Label_{label_id.item()}")
+            box_coords = [int(i) for i in box.tolist()]
+            boxes.append({"coords": box_coords, "label": label})
+            
+    page_stem = Path(image_path).name.rsplit(".", 1)[0]
+    
+    if not boxes:
+        return {
+            "page_idx": page_idx,
+            "page_size": list(corrected_image.size),
+            "blocks": []
+        }, []
+        
+    # 绘制画框诊断图并保存
+    from PIL import ImageDraw
+    diag_img = corrected_image.copy()
+    diag_draw = ImageDraw.Draw(diag_img)
+    colors = {
+        "text": "green",
+        "table": "blue",
+        "formula": "red",
+        "figure": "purple",
+        "image": "purple",
+        "chart": "purple"
+    }
+    for box_item in boxes:
+        coords = box_item["coords"]
+        lbl = box_item["label"]
+        color = colors.get(lbl.lower(), "yellow")
+        diag_draw.rectangle(coords, outline=color, width=3)
+        diag_draw.text((coords[0], max(0, coords[1] - 12)), lbl, fill=color)
+        
+    diagnostics_subdir = os.path.join(output_dir, "diagnostics")
+    os.makedirs(diagnostics_subdir, exist_ok=True)
+    diag_filename = f"{page_stem}_diagnostic.png"
+    diag_path = os.path.join(diagnostics_subdir, diag_filename)
+    diag_img.save(diag_path)
+    
+    # XY-Cut 排序
+    sorted_indices = sort_boxes_by_xy_cut(boxes)
+    
+    page_structure = {
+        "page_idx": page_idx,
+        "page_size": list(corrected_image.size),
+        "blocks": []
+    }
+    ocr_tasks = []
+    
+    fig_counter = 1
+    table_counter = 1
+    formula_counter = 1
+    
+    for block_idx, idx in enumerate(sorted_indices):
+        element = boxes[idx]
+        label = element["label"]
+        lbl_lower = label.lower()
+        
+        if not keep_header_footer:
+            has_table = any(b["label"].lower() == "table" for b in boxes)
+            if lbl_lower == "footer" or (lbl_lower == "header" and not has_table):
+                continue
+                
+        is_crop = False
+        clean_tag = ""
+        markdown_label = ""
+        counter = 0
+        
+        if lbl_lower in ["figure", "image", "chart"]:
+            is_crop = True
+            clean_tag = "fig"
+            markdown_label = "figure"
+            counter = fig_counter
+            fig_counter += 1
+        elif lbl_lower == "table" and table_as_image:
+            is_crop = True
+            clean_tag = "table"
+            markdown_label = "table"
+            counter = table_counter
+            table_counter += 1
+        elif lbl_lower == "formula" and formula_as_image:
+            is_crop = True
+            clean_tag = "formula"
+            markdown_label = "formula"
+            counter = formula_counter
+            formula_counter += 1
+            
+        if is_crop:
+            filename = f"{page_stem}_{clean_tag}_{counter}.png"
+            images_subdir = os.path.join(output_dir, "images")
+            os.makedirs(images_subdir, exist_ok=True)
+            fig_path = os.path.join(images_subdir, filename)
+            cropped_fig = corrected_image.crop(element["coords"])
+            cropped_fig.save(fig_path)
+            
+            width_str = ""
+            if clean_tag in ["fig", "table"]:
+                page_width = corrected_image.size[0]
+                box_coords = element["coords"]
+                box_width = box_coords[2] - box_coords[0]
+                ratio = float(box_width) / page_width
+                
+                if ratio >= 0.65:
+                    width_str = "{width=100%}"
+                elif ratio >= 0.35:
+                    width_str = "{width=70%}"
+                else:
+                    width_str = "{width=45%}"
+                    
+            page_structure["blocks"].append({
+                "block_idx": block_idx,
+                "type": "image_block",
+                "label": label,
+                "bbox": element["coords"],
+                "image_path": f"images/{filename}",
+                "width_str": width_str
+            })
+        else:
+            cropped_sub = crop_and_mask(corrected_image, boxes, idx)
+            page_structure["blocks"].append({
+                "block_idx": block_idx,
+                "type": "ocr_task",
+                "label": label,
+                "bbox": element["coords"],
+                "content": None
+            })
+            ocr_tasks.append({
+                "page_idx": page_idx,
+                "block_idx": block_idx,
+                "label": label,
+                "image": cropped_sub
+            })
+            
+    return page_structure, ocr_tasks
+
+
+async def run_pipeline_flow_async(
+    img_files: list,
+    output_dir: str,
+    stem: str,
+    table_as_image: bool = True,
+    formula_as_image: bool = False,
+    keep_header_footer: bool = False,
+    max_layout_workers: int = 2,
+    ocr_concurrency: int = 4
+) -> list:
+    global _global_predictor
+    if _global_predictor is None:
+        _global_predictor = LayoutPredictor(LOCAL_LAYOUT_MODEL)
+        
+    total_pages = len(img_files)
+    assembler = StreamAssembler(output_dir, stem, total_pages)
+    
+    layout_queue = asyncio.Queue()
+    ocr_queue = asyncio.Queue()
+    
+    for idx, img_path in enumerate(img_files):
+        await layout_queue.put({"page_idx": idx, "img_path": str(img_path)})
+        
+    loop = asyncio.get_running_loop()
+    from concurrent.futures import ThreadPoolExecutor
+    thread_pool = ThreadPoolExecutor(max_workers=max_layout_workers)
+    
+    async def layout_worker():
+        while True:
+            page_idx = -1
+            got_task = False
+            try:
+                task = await layout_queue.get()
+                got_task = True
+                page_idx = task["page_idx"]
+                img_path = task["img_path"]
+                
+                page_structure, ocr_tasks = await loop.run_in_executor(
+                    thread_pool,
+                    process_single_page_layout,
+                    img_path, page_idx, _global_predictor, output_dir, keep_header_footer, table_as_image, formula_as_image
+                )
+                
+                await assembler.register_page(page_idx, page_structure)
+                for ocr_task in ocr_tasks:
+                    await ocr_queue.put(ocr_task)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                print(f"[FAIL] Layout 异常 (Page {page_idx}): {e}")
+                if page_idx != -1:
+                    err_structure = {
+                        "page_idx": page_idx,
+                        "page_size": [100, 100],
+                        "blocks": [{"block_idx": 0, "type": "ocr_task", "label": "paragraph", "bbox": [0,0,10,10], "content": f"[Layout分析异常: {e}]"}]
+                    }
+                    await assembler.register_page(page_idx, err_structure)
+            finally:
+                if got_task:
+                    layout_queue.task_done()
+                
+    sem = asyncio.Semaphore(ocr_concurrency)
+    import aiohttp
+    async def ocr_worker():
+        async with aiohttp.ClientSession() as session:
+            while True:
+                got_task = False
+                try:
+                    task = await ocr_queue.get()
+                    got_task = True
+                    page_idx = task["page_idx"]
+                    block_idx = task["block_idx"]
+                    label = task["label"]
+                    img_obj = task["image"]
+                    
+                    content = await ocr_single_image(session, img_obj, label, sem)
+                    await assembler.fill_ocr_content(page_idx, block_idx, content)
+                except asyncio.CancelledError:
+                    break
+                except Exception as e:
+                    print(f"[FAIL] OCR 异常 (Page {page_idx}, Block {block_idx}): {e}")
+                    await assembler.fill_ocr_content(page_idx, block_idx, f"[OCR识别失败: {e}]")
+                finally:
+                    if got_task:
+                        ocr_queue.task_done()
+                    
+    layout_tasks = [asyncio.create_task(layout_worker()) for _ in range(max_layout_workers)]
+    ocr_tasks = [asyncio.create_task(ocr_worker()) for _ in range(ocr_concurrency)]
+    
+    await layout_queue.join()
+    await ocr_queue.join()
+    await assembler.finished_event.wait()
+    
+    for w in layout_tasks:
+        w.cancel()
+    for w in ocr_tasks:
+        w.cancel()
+    thread_pool.shutdown()
+    
+    return assembler.final_pdf_info
+
 
 

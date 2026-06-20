@@ -1,6 +1,7 @@
 import unittest
 import gc
 import torch
+from unittest.mock import patch
 from PIL import Image
 from pipeline.orchestrator import LayoutPredictor, LOCAL_LAYOUT_MODEL
 
@@ -148,5 +149,67 @@ class TestStreamAssembler(unittest.TestCase):
             self.assertEqual(assembler.final_pdf_info[0]["blocks"][1]["content"], "Hello 1")
             
         asyncio.run(run_test())
+
+
+class TestAsyncPipelineFlow(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir)
+
+    @patch('pipeline.orchestrator.LayoutPredictor')
+    @patch('pipeline.orchestrator.ocr_single_image')
+    def test_run_pipeline_flow_async(self, mock_ocr, mock_predictor_cls):
+        # 1. 模拟 OCR 返回值
+        mock_ocr.return_value = "Mocked OCR Result Text"
+        
+        # 2. 模拟 predictor 实例及 model config
+        mock_predictor = mock_predictor_cls.return_value
+        from unittest.mock import MagicMock
+        mock_model = MagicMock()
+        mock_model.config.id2label = {0: "text"}
+        mock_predictor.model = mock_model
+        
+        # 模拟检测结果：1个 text 类型的框
+        mock_predictor.predict.return_value = [{
+            "scores": torch.tensor([0.95]),
+            "labels": torch.tensor([0]), # 映射为 text
+            "boxes": torch.tensor([[5.0, 5.0, 150.0, 80.0]])
+        }]
+        
+        # 3. 创建空白临时图片
+        img_path = Path(self.temp_dir) / "page_00001.png"
+        with Image.new("RGB", (300, 300), (255, 255, 255)) as img:
+            img.save(img_path)
+            
+        from pipeline.orchestrator import run_pipeline_flow_async
+        
+        async def run_flow():
+            pdf_info = await run_pipeline_flow_async(
+                img_files=[img_path],
+                output_dir=self.temp_dir,
+                stem="test_doc",
+                table_as_image=True,
+                formula_as_image=False,
+                keep_header_footer=False,
+                max_layout_workers=2,
+                ocr_concurrency=4
+            )
+            return pdf_info
+            
+        pdf_info = asyncio.run(run_flow())
+        
+        self.assertIsInstance(pdf_info, list)
+        self.assertEqual(len(pdf_info), 1)
+        self.assertEqual(pdf_info[0]["page_idx"], 0)
+        self.assertEqual(len(pdf_info[0]["blocks"]), 1)
+        self.assertEqual(pdf_info[0]["blocks"][0]["content"], "Mocked OCR Result Text")
+        
+        # 验证 Markdown 文件正确追加写盘
+        output_md = Path(self.temp_dir) / "final_output.md"
+        self.assertTrue(output_md.exists())
+        self.assertIn("Mocked OCR Result Text", output_md.read_text(encoding="utf-8"))
+
 
 

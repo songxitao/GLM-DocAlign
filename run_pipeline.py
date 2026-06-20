@@ -7,7 +7,7 @@ import subprocess
 from pathlib import Path
 from preprocessing import convert_pdf_to_images
 from postprocessing import smart_reflow_markdown, convert_file_with_pandoc
-from pipeline.orchestrator import run_pipeline_flow
+from pipeline.orchestrator import run_pipeline_flow, run_pipeline_flow_async
 
 def main():
     import json
@@ -26,7 +26,7 @@ def main():
         sys.argv.remove("--keep-header-footer")
 
     if len(sys.argv) < 2:
-        print("📢 用法: python run_pipeline.py <PDF路径或图片路径> [输出目录] [--force] [--ocr-table] [--keep-header-footer]")
+        print("[INFO] 用法: python run_pipeline.py <PDF路径或图片路径> [输出目录] [--force] [--ocr-table] [--keep-header-footer]")
         sys.exit(1)
         
     input_path = Path(sys.argv[1])
@@ -39,7 +39,7 @@ def main():
         output_dir = Path("ocr_output") / stem
     
     if not input_path.exists():
-        print(f"❌ 找不到输入文件: {input_path}")
+        print(f"[FAIL] 找不到输入文件: {input_path}")
         sys.exit(1)
         
     middle_json_path = output_dir / f"{stem}_middle.json"
@@ -53,13 +53,13 @@ def main():
             # 探测本地 API 服务是否在线
             requests.get(vllm_api_url, timeout=2)
         except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
-            print("⚠️  提示: 检测到本地 GLM-OCR 大模型 API 服务（8700端口）处于未开启状态！")
-            print("🔄 正在尝试自动为您拉起本地 Docker 容器大模型后台 (start_glmocr.bat)...")
+            print("[WARN] 提示: 检测到本地 GLM-OCR 大模型 API 服务（8700端口）处于未开启状态！")
+            print("[RUN] 正在尝试自动为您拉起本地 Docker 容器大模型后台 (start_glmocr.bat)...")
             try:
                 # 弹出新控制台，执行 start_glmocr.bat
                 subprocess.Popen(["start_glmocr.bat"], shell=True, creationflags=subprocess.CREATE_NEW_CONSOLE)
                 
-                print("⏳ 正在等待大模型加载就绪（一般约需 20-40 秒，可在新弹出的窗口查看进度）...")
+                print("[WAIT] 正在等待大模型加载就绪（一般约需 20-40 秒，可在新弹出的窗口查看进度）...")
                 max_retries = 30
                 started = False
                 for retry in range(max_retries):
@@ -67,7 +67,7 @@ def main():
                     try:
                         resp = requests.get(vllm_api_url, timeout=2)
                         if resp.status_code == 200:
-                            print("🎉 GLM-OCR 本地服务加载成功！继续执行解析...")
+                            print("[OK] GLM-OCR 本地服务加载成功！继续执行解析...")
                             started = True
                             break
                     except Exception:
@@ -75,15 +75,15 @@ def main():
                     print(f"   [等待中] 已检测 { (retry + 1) * 3 } 秒...")
                 
                 if not started:
-                    print("❌ 等待服务启动超时。请确保您的 Docker 环境已启动且 GPU 资源未被占用。")
+                    print("[FAIL] 等待服务启动超时。请确保您的 Docker 环境已启动且 GPU 资源未被占用。")
                     sys.exit(1)
             except Exception as start_err:
-                print(f"❌ 自动拉起服务失败: {start_err}。请手动运行 start_glmocr.bat 确认服务启动后再试。")
+                print(f"[FAIL] 自动拉起服务失败: {start_err}。请手动运行 start_glmocr.bat 确认服务启动后再试。")
                 sys.exit(1)
 
     # 3. 改造缓存命中后的本地免 API 渲染逻辑
     if middle_json_path.exists() and not force:
-        print("📢 检测到本地缓存，正在直接渲染 Markdown 与 Word，无需调用 VLM API...")
+        print("[INFO] 检测到本地缓存，正在直接渲染 Markdown 与 Word，无需调用 VLM API...")
         try:
             cache_data = json.loads(middle_json_path.read_text(encoding="utf-8"))
             pdf_info = cache_data.get("pdf_info", [])
@@ -126,62 +126,59 @@ def main():
             output_md_path = output_dir / "final_output.md"
             output_md_path.parent.mkdir(exist_ok=True, parents=True)
             output_md_path.write_text(final_md_content, encoding="utf-8")
-            print(f"✅ 最终 Markdown 已保存至: {output_md_path}")
+            print(f"[OK] 最终 Markdown 已保存至: {output_md_path}")
             
             # 调用 Pandoc 转换为 Word
-            print("🔄 正在通过 Pandoc 导出 Word 文档...")
+            print("[RUN] 正在通过 Pandoc 导出 Word 文档...")
             docx_file = convert_file_with_pandoc(output_md_path, "docx")
             if docx_file:
-                print(f"🎉 转换成功！Word 文档已输出至: {docx_file.absolute()}")
+                print(f"[OK] 转换成功！Word 文档已输出至: {docx_file.absolute()}")
             else:
-                print("⚠️ 提示: Pandoc 转换失败，请确认系统已安装 Pandoc 并配置在环境变量中。")
+                print("[WARN] 提示: Pandoc 转换失败，请确认系统已安装 Pandoc 并配置在环境变量中。")
             return
             
         except Exception as e:
-            print(f"⚠️ 读取缓存中介 JSON 失败: {e}，将重新运行完整管线。")
+            print(f"[WARN] 读取缓存中介 JSON 失败: {e}，将重新运行完整管线。")
 
     # 1. 判断如果是 PDF，先渲染成图片
     if input_path.suffix.lower() == ".pdf":
         temp_img_dir = output_dir / "temp_images"
-        print(f"🔄 正在将 PDF {input_path} 转换为临时图片...")
+        print(f"[RUN] 正在将 PDF {input_path} 转换为临时图片...")
         convert_pdf_to_images(input_path, temp_img_dir, dpi=300)
         img_files = sorted(temp_img_dir.glob("page_*.png"))
     else:
         img_files = [input_path]
         
-    # 2. 依次运行 Pipeline 获取 Markdown 并缝合
-    all_pages_markdown = []
-    all_pages_middle_data = []
-    for idx, img_path in enumerate(img_files):
-        print(f"🧠 正在分析并识别页面: {img_path.name}...")
-        # 正确解包返回的 (page_md, page_middle_data)
-        page_md, page_middle_data = run_pipeline_flow(str(img_path), str(output_dir), page_idx=idx, table_as_image=not ocr_table, keep_header_footer=keep_header_footer)
-        
-        # 3. 对单页内容运行 smart_reflow_markdown 优化换行
-        reflowed_md = smart_reflow_markdown(page_md)
-        all_pages_markdown.append(reflowed_md)
-        all_pages_middle_data.append(page_middle_data)
-        
-    # 4. 缝合拼接所有页面并保存
-    final_md_content = "\n\n\\newpage\n\n".join(all_pages_markdown)
+    # 2. 启动三级流式异步流水线进行识别
+    print("[RUN] 启动三级流式异步流水线进行识别...")
+    all_pages_middle_data = asyncio.run(
+        run_pipeline_flow_async(
+            img_files=img_files,
+            output_dir=str(output_dir),
+            stem=stem,
+            table_as_image=not ocr_table,
+            formula_as_image=False,
+            keep_header_footer=keep_header_footer,
+            max_layout_workers=2,
+            ocr_concurrency=4
+        )
+    )
     output_md_path = output_dir / "final_output.md"
-    output_md_path.parent.mkdir(exist_ok=True, parents=True)
-    output_md_path.write_text(final_md_content, encoding="utf-8")
-    print(f"✅ 最终 Markdown 已保存至: {output_md_path}")
+    print(f"[OK] 最终 Markdown 已保存至: {output_md_path}")
     
     # 💾 保存中介 JSON 归档数据实现持久化缓存
     middle_json = {"pdf_info": all_pages_middle_data}
     middle_json_path.parent.mkdir(exist_ok=True, parents=True)
     middle_json_path.write_text(json.dumps(middle_json, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(f"💾 中介 JSON 缓存已保存至: {middle_json_path}")
+    print(f"[INFO] 中介 JSON 缓存已保存至: {middle_json_path}")
     
     # 5. 调用 Pandoc 转换为 Word (仅在系统存在 pandoc 时生效，不为硬断言)
-    print("🔄 正在通过 Pandoc 导出 Word 文档...")
+    print("[RUN] 正在通过 Pandoc 导出 Word 文档...")
     docx_file = convert_file_with_pandoc(output_md_path, "docx")
     if docx_file:
-        print(f"🎉 转换成功！Word 文档已输出至: {docx_file.absolute()}")
+        print(f"[OK] 转换成功！Word 文档已输出至: {docx_file.absolute()}")
     else:
-        print("⚠️ 提示: Pandoc 转换失败，请确认系统已安装 Pandoc 并配置在环境变量中。")
+        print("[WARN] 提示: Pandoc 转换失败，请确认系统已安装 Pandoc 并配置在环境变量中。")
 
 if __name__ == "__main__":
     main()
