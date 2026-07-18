@@ -8,7 +8,7 @@
 </p>
 
 <p align="center">
-  🤗 <a href="#quickstart">快速开始</a> &nbsp&nbsp | &nbsp&nbsp 📑 <a href="#key-features">核心特性</a> &nbsp&nbsp | &nbsp&nbsp 🏗️ <a href="#architecture">架构设计</a> &nbsp&nbsp | &nbsp&nbsp 📊 <a href="#advanced-tuning">进阶调优</a>
+  🤗 <a href="#quickstart">快速开始</a>&nbsp;&nbsp;|&nbsp;&nbsp;📑 <a href="#key-features">核心特性</a>&nbsp;&nbsp;|&nbsp;&nbsp;🏗️ <a href="#architecture">架构设计</a>&nbsp;&nbsp;|&nbsp;&nbsp;📊 <a href="#advanced-tuning">进阶调优</a>
 </p>
 
 ---
@@ -43,24 +43,24 @@
 
 ```mermaid
 graph TD
-    A["PDF 输入"] -->|预处理 fitz 渲染| B["多页 PNG 图像"]
-    B -->|加载本地 PP-DocLayout-V3| C["版面分析 (Boxes)"]
-    C -->|XY-Cut 物理重排序| D["有序 Block 序列"]
+    A["PDF 输入"] -->|"预处理 fitz 渲染"| B["多页 PNG 图像"]
+    B -->|"加载本地 PP-DocLayout-V3"| C["版面分析 (Boxes)"]
+    C -->|"XY-Cut 物理重排序"| D["有序 Block 序列"]
     
-    D -->|判断 table_as_image=True| E{"截图分流?"}
-    E -->|Yes: table/chart/image| F["物理截图并存盘 images/"]
-    E -->|No: text/formula| G["遮罩去噪裁剪 (crop_and_mask)"]
+    D -->|"判断 table_as_image=True"| E{"截图分流?"}
+    E -->|"Yes: table/chart/image"| F["物理截图并存盘 images/"]
+    E -->|"No: text/formula"| G["遮罩去噪裁剪 (crop_and_mask)"]
     
-    G -->|异步并发 API 请求| H["远程 GLM-OCR 服务"]
-    H -->|文本/公式/标题 OCR 文本| I["缝合合并 (Stitch)"]
-    F -->|![table](images/...) 标签| I
+    G -->|"异步并发 API 请求"| H["远程 GLM-OCR 服务"]
+    H -->|"文本/公式/标题 OCR 文本"| I["缝合合并 (Stitch)"]
+    F -->|"Markdown 图片标签"| I
     
-    I -->|序列化缓存| J["生成 _middle.json 缓存"]
-    I -->|连字符清洗 & 全角转半角| K["Markdown / DOCX 产物"]
+    I -->|"序列化缓存"| J["生成 _middle.json 缓存"]
+    I -->|"连字符清洗 全角转半角"| K["Markdown / DOCX 产物"]
     
     %% 缓存分支
-    A -.->|检测到本地缓存且无 --force| L["读取 _middle.json"]
-    L -.->|离线免 VLM 直接拼接| K
+    A -.->|"检测到本地缓存且无 --force"| L["读取 _middle.json"]
+    L -.->|"离线免 VLM 直接拼接"| K
 ```
 
 ---
@@ -78,21 +78,21 @@ graph TD
 
 ```mermaid
 graph TD
-    PDF[PDF 文件 / 图片列表] -->|1. 任务拆分| LayoutQueue[layout_queue]
+    PDF["PDF 文件 / 图片列表"] -->|"1. 任务拆分"| LayoutQueue[layout_queue]
     
-    subgraph 车间一: Layout 解析 (CPU 2线程池)
-        LayoutQueue -->|消费页面任务| LayoutWorkers[Layout Workers]
-        LayoutWorkers -->|2a. 注册页面骨架| Assembler[StreamAssembler]
-        LayoutWorkers -->|2b. 提取OCR文本块任务| OCRQueue[ocr_queue]
+    subgraph "车间一: Layout 解析 (CPU 2线程池)"
+        LayoutQueue -->|"消费页面任务"| LayoutWorkers["Layout Workers"]
+        LayoutWorkers -->|"2a. 注册页面骨架"| Assembler[StreamAssembler]
+        LayoutWorkers -->|"2b. 提取OCR文本块任务"| OCRQueue[ocr_queue]
     end
 
-    subgraph 车间二: OCR 识别 (asyncio 协程)
-        OCRQueue -->|消费子图任务| OCRWorkers[OCR Workers]
-        OCRWorkers -->|3. 并发发送识别结果| Assembler
+    subgraph "车间二: OCR 识别 (asyncio 协程)"
+        OCRQueue -->|"消费子图任务"| OCRWorkers["OCR Workers"]
+        OCRWorkers -->|"3. 并发发送识别结果"| Assembler
     end
 
-    subgraph 车间三: 保序组装与流式写盘 (StreamAssembler)
-        Assembler -->|4. 自动保序拼装| Output[final_output.md / docx / middle.json]
+    subgraph "车间三: 保序组装与流式写盘"
+        Assembler -->|"4. 自动保序拼装"| Output["final_output.md / docx / middle.json"]
     end
 ```
 
