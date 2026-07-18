@@ -1,9 +1,37 @@
+# GLM-OCR Project Specific
 mineru_integration/transformers/
 mineru_integration/__pycache__/
-__pycache__/
+ocr_results/
+ocr_output/
+tests/output_result/
+scratch/
 *.png
 *.jpg
 *.jpeg
 *.pdf
-ocr_results/
-scratch/
+*.docx
+model/
+.codegraph/
+
+# Python Build, Compilation, and Packaging
+build/
+dist/
+*.egg-info/
+*.egg
+.eggs/
+*.pyc
+*.pyo
+*.pyd
+__pycache__/
+
+# Python Virtual Environments
+venv/
+.venv/
+env/
+.env
+
+# Testing, Coverage, and Cache
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/

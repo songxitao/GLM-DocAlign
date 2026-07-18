@@ -11,7 +11,7 @@ def patched_init(self, *args, **kwargs):
 aiohttp.ClientResponse.__init__ = patched_init
 
 from aioresponses import aioresponses
-from pipeline.async_ocr import run_async_ocr
+from glmocr.pipeline.async_ocr import run_async_ocr
 
 @pytest.mark.asyncio
 async def test_async_ocr_success_and_fallback():

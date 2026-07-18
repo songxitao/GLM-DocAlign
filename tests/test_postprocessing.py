@@ -2,10 +2,8 @@ import unittest
 import sys
 from pathlib import Path
 
-# 将父目录加入 sys.path 以便加载 postprocessing 模块
-sys.path.append(str(Path(__file__).parent.parent))
 
-from postprocessing import (
+from glmocr.postprocessing import (
     full_to_half_exclude_marks,
     smart_reflow_markdown
 )
@@ -26,7 +24,7 @@ class TestPostProcessing(unittest.TestCase):
     def test_process_grounded_markdown_table_and_chart(self):
         import tempfile
         from PIL import Image
-        from postprocessing import process_grounded_markdown
+        from glmocr.postprocessing import process_grounded_markdown
         
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_dir_path = Path(tmpdir)
@@ -71,7 +69,7 @@ class TestPostProcessing(unittest.TestCase):
     def test_create_diagnosis_image_colors(self):
         import tempfile
         from PIL import Image
-        from postprocessing import create_diagnosis_image
+        from glmocr.postprocessing import create_diagnosis_image
         
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_dir_path = Path(tmpdir)

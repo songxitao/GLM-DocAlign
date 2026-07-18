@@ -1,5 +1,5 @@
 import unittest
-from pipeline.xycut import sort_boxes_by_xy_cut
+from glmocr.pipeline.xycut import sort_boxes_by_xy_cut
 
 class TestXYCut(unittest.TestCase):
     def test_xycut_sorting(self):

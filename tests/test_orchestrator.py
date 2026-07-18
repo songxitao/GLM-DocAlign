@@ -3,17 +3,47 @@ import gc
 import torch
 from unittest.mock import patch
 from PIL import Image
-from pipeline.orchestrator import LayoutPredictor, LOCAL_LAYOUT_MODEL
+from glmocr.pipeline.orchestrator import LayoutPredictor, LOCAL_LAYOUT_MODEL
 
 class TestLayoutPredictor(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.predictor = LayoutPredictor(LOCAL_LAYOUT_MODEL)
+        from unittest.mock import MagicMock
+        cls.patcher_model = patch('transformers.AutoModelForObjectDetection.from_pretrained')
+        cls.patcher_processor = patch('transformers.AutoImageProcessor.from_pretrained')
+        
+        mock_model_from_pretrained = cls.patcher_model.start()
+        mock_processor_from_pretrained = cls.patcher_processor.start()
+        
+        # 模拟 model
+        mock_model = MagicMock()
+        mock_model.return_value = MagicMock()
+        mock_model_from_pretrained.return_value = mock_model
+        
+        # 模拟 processor
+        mock_processor = MagicMock()
+        
+        class MockInputs(dict):
+            def to(self, device):
+                return self
+                
+        mock_inputs = MockInputs(pixel_values=torch.zeros(1, 3, 224, 224))
+        mock_processor.return_value = mock_inputs
+        
+        mock_processor.post_process_object_detection.return_value = [{
+            "scores": torch.tensor([0.95]),
+            "labels": torch.tensor([0]),
+            "boxes": torch.tensor([[10.0, 10.0, 100.0, 100.0]])
+        }]
+        mock_processor_from_pretrained.return_value = mock_processor
+        
+        # 传入物理存在的路径 "." 以通过 os.path.exists 路径检查，模型加载依然由 Mock 拦截
+        cls.predictor = LayoutPredictor(".")
 
     @classmethod
     def tearDownClass(cls):
-        cls.predictor.model = None
-        cls.predictor.image_processor = None
+        cls.patcher_model.stop()
+        cls.patcher_processor.stop()
         cls.predictor = None
         gc.collect()
         if torch.cuda.is_available():
@@ -44,7 +74,7 @@ import tempfile
 import shutil
 import asyncio
 from pathlib import Path
-from pipeline.orchestrator import StreamAssembler
+from glmocr.pipeline.orchestrator import StreamAssembler
 
 class TestStreamAssembler(unittest.TestCase):
     def setUp(self):
@@ -158,8 +188,8 @@ class TestAsyncPipelineFlow(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.temp_dir)
 
-    @patch('pipeline.orchestrator.LayoutPredictor')
-    @patch('pipeline.orchestrator.ocr_single_image')
+    @patch('glmocr.pipeline.orchestrator.LayoutPredictor')
+    @patch('glmocr.pipeline.orchestrator.ocr_single_image')
     def test_run_pipeline_flow_async(self, mock_ocr, mock_predictor_cls):
         # 1. 模拟 OCR 返回值
         mock_ocr.return_value = "Mocked OCR Result Text"
@@ -183,7 +213,7 @@ class TestAsyncPipelineFlow(unittest.TestCase):
         with Image.new("RGB", (300, 300), (255, 255, 255)) as img:
             img.save(img_path)
             
-        from pipeline.orchestrator import run_pipeline_flow_async
+        from glmocr.pipeline.orchestrator import run_pipeline_flow_async
         
         async def run_flow():
             pdf_info = await run_pipeline_flow_async(

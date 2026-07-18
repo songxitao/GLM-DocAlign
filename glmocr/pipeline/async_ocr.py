@@ -5,8 +5,7 @@ import os
 import io
 from PIL import Image
 
-VLLM_API_URL = "http://127.0.0.1:8700/v1/chat/completions"
-MODEL_NAME = "glm-ocr"
+from glmocr.config import VLLM_API_URL, MODEL_NAME
 
 async def ocr_single_image(session: aiohttp.ClientSession, img_path_or_pil, label: str, sem: asyncio.Semaphore) -> str:
     async with sem:

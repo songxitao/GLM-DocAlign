@@ -1,6 +1,6 @@
 import numpy as np
 from PIL import Image
-from pipeline.masked_crop import crop_and_mask
+from glmocr.pipeline.masked_crop import crop_and_mask
 
 def test_masked_crop_logic():
     img = Image.new("RGB", (300, 300), (0, 0, 0))

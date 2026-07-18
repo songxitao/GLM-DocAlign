@@ -5,9 +5,10 @@ import time
 import requests
 import subprocess
 from pathlib import Path
-from preprocessing import convert_pdf_to_images
-from postprocessing import smart_reflow_markdown, convert_file_with_pandoc
-from pipeline.orchestrator import run_pipeline_flow, run_pipeline_flow_async
+from glmocr.preprocessing import convert_pdf_to_images
+from glmocr.postprocessing import smart_reflow_markdown, convert_file_with_pandoc
+from glmocr.pipeline.orchestrator import run_pipeline_flow, run_pipeline_flow_async
+from glmocr.config import VLLM_API_MODELS_URL
 
 def main():
     import json
@@ -48,7 +49,7 @@ def main():
     # 如果用户没有传递缓存渲染（或者缓存未命中），则必须确保 VLM 接口是在线状态
     needs_api = not (middle_json_path.exists() and not force)
     if needs_api:
-        vllm_api_url = "http://127.0.0.1:8700/v1/models"
+        vllm_api_url = VLLM_API_MODELS_URL
         try:
             # 探测本地 API 服务是否在线
             requests.get(vllm_api_url, timeout=2)
@@ -60,7 +61,7 @@ def main():
                 subprocess.Popen(["start_glmocr.bat"], shell=True, creationflags=subprocess.CREATE_NEW_CONSOLE)
                 
                 print("[WAIT] 正在等待大模型加载就绪（一般约需 20-40 秒，可在新弹出的窗口查看进度）...")
-                max_retries = 30
+                max_retries = 50
                 started = False
                 for retry in range(max_retries):
                     time.sleep(3)
@@ -72,7 +73,7 @@ def main():
                             break
                     except Exception:
                         pass
-                    print(f"   [等待中] 已检测 { (retry + 1) * 3 } 秒...")
+                    print(f"   [等待中] 已检测 { (retry + 1) * 3 } 秒...,剩余重试次数:{(max_retries - (retry + 1))*3}次")
                 
                 if not started:
                     print("[FAIL] 等待服务启动超时。请确保您的 Docker 环境已启动且 GPU 资源未被占用。")

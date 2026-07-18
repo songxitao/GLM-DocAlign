@@ -4,17 +4,26 @@ import asyncio
 from PIL import Image
 from transformers import AutoImageProcessor, AutoModelForObjectDetection
 
-from pipeline.deskew import detect_skew_angle, rotate_image
-from pipeline.xycut import sort_boxes_by_xy_cut
-from pipeline.masked_crop import crop_and_mask
-from pipeline.async_ocr import run_async_ocr, ocr_single_image
+from glmocr.pipeline.deskew import detect_skew_angle, rotate_image
+from glmocr.pipeline.xycut import sort_boxes_by_xy_cut
+from glmocr.pipeline.masked_crop import crop_and_mask
+from glmocr.pipeline.async_ocr import run_async_ocr, ocr_single_image
 
-LOCAL_LAYOUT_MODEL = r"E:\project\GLM-OCR\model\PP-DocLayoutV3safetensor"
+from glmocr.config import LOCAL_LAYOUT_MODEL
 _global_predictor = None
 
 
 class LayoutPredictor:
     def __init__(self, model_dir: str):
+        if not os.path.exists(model_dir):
+            raise FileNotFoundError(
+                f"\n[FAIL] 无法找到 Layout 模型目录: {model_dir}\n"
+                f"本项目已将业务代码与大模型权重解耦。请执行以下步骤以物理关联模型：\n"
+                f"1. 从 ModelScope(魔搭社区) 下载 PP-DocLayout-V3 模型权重。\n"
+                f"2. 在项目根目录下创建 model/ 目录，并将解压后的模型放置于 model/PP-DocLayoutV3safetensor/\n"
+                f"   (或者配置系统环境变量 LOCAL_LAYOUT_MODEL 指向您的自定义模型物理路径)\n"
+                f"🔗 ModelScope 权重下载链接: https://modelscope.cn/models/songxitao/PP-DocLayoutV3safetensor\n"
+            )
         self.model = AutoModelForObjectDetection.from_pretrained(model_dir).to("cpu")
         self.image_processor = AutoImageProcessor.from_pretrained(model_dir)
 
@@ -271,7 +280,7 @@ def run_pipeline_flow(
 
 
 from pathlib import Path
-from postprocessing import smart_reflow_markdown
+from glmocr.postprocessing import smart_reflow_markdown
 
 class StreamAssembler:
     def __init__(self, output_dir, stem, total_pages):

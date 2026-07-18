@@ -1,6 +1,6 @@
 import numpy as np
 from PIL import Image, ImageDraw
-from pipeline.deskew import detect_skew_angle, rotate_image
+from glmocr.pipeline.deskew import detect_skew_angle, rotate_image
 
 def test_deskew_logic():
     img = Image.new("RGB", (400, 400), (255, 255, 255))

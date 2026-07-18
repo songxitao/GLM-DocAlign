@@ -12,14 +12,12 @@ import tempfile
 
 # ✨ 导入前后处理工具 (GLM-OCR 不需要 Grounding 相关函数)
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from preprocessing import convert_pdf_to_images
-from postprocessing import merge_markdown_files, convert_file_with_pandoc
+from glmocr.preprocessing import convert_pdf_to_images
+from glmocr.postprocessing import merge_markdown_files, convert_file_with_pandoc
+from glmocr.config import VLLM_API_URL, MODEL_NAME
 
 # --- (全局配置) ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - [GLM_OCR_UI] - %(message)s')
-# ✨ GLM-OCR 使用 vLLM 标准 OpenAI 兼容 API，端口 8080
-VLLM_API_URL = "http://127.0.0.1:8700/v1/chat/completions"
-MODEL_NAME = "glm-ocr"
 MERGE_MODE_SINGLE_STREAM = "合并为单页流式文档 (默认)"
 MERGE_MODE_PAGINATED = "保留分页 (每页PDF一页Word)"
 

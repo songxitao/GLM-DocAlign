@@ -10,11 +10,11 @@ import shutil
 import tempfile
 from tqdm import tqdm
 
-from preprocessing import convert_pdf_to_images
-from postprocessing import merge_markdown_files, convert_file_with_pandoc
+from glmocr.preprocessing import convert_pdf_to_images
+from glmocr.postprocessing import merge_markdown_files, convert_file_with_pandoc
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - [OCR_UI_FINAL] - %(message)s')
-VLLM_SERVER_URL = "http://127.0.0.1:8000/ocr"
+VLLM_SERVER_URL = os.getenv("VLLM_SERVER_URL", "http://127.0.0.1:8000/ocr")
 
 def ocr_pipeline(input_files, input_path_textbox, ocr_mode, convert_format):
     start_time = time.time()
