@@ -2,6 +2,9 @@
 chcp 65001 > nul
 setlocal
 
+:: 物理定位回到项目根目录，以保证相对运行环境的一致性
+cd /d "%~dp0\.."
+
 :: ===================================================================
 ::           GLM-OCR vLLM Service Launcher (v2.1)
 :: ===================================================================
@@ -46,7 +49,7 @@ echo [3/4] Starting Gradio frontend...
 timeout /t 5 > nul
 start "" http://127.0.0.1:7860
 
-start "GLM_OCR_FRONTEND_PROCESS" cmd /c "python appocr_vllm_ui.py"
+start "GLM_OCR_FRONTEND_PROCESS" cmd /c "python scripts/ui/appocr_vllm_ui.py"
 echo.
 
 :: --- Step 4: Done ---

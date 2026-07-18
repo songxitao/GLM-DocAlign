@@ -12,6 +12,7 @@ scratch/
 *.docx
 model/
 .codegraph/
+.agents/
 
 # Python Build, Compilation, and Packaging
 build/

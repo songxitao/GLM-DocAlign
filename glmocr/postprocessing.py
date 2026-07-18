@@ -217,12 +217,12 @@ def convert_file_with_pandoc(input_file: Path, output_format: str, use_lua: bool
         print("\n--- Error: Pandoc not found. ---")
         return None
         
-    lua_filter_path = (Path(__file__).parent / "pagebreak.lua").resolve().absolute()
-    template_path = (Path(__file__).parent / "my_template_academic.docx").resolve().absolute()
+    lua_filter_path = (Path(__file__).parent / "templates" / "pagebreak.lua").resolve().absolute()
+    template_path = (Path(__file__).parent / "templates" / "my_template_academic.docx").resolve().absolute()
     if not template_path.exists():
-        template_path = (Path(__file__).parent / "my_template1.docx").resolve().absolute()
+        template_path = (Path(__file__).parent / "templates" / "my_template1.docx").resolve().absolute()
     if not template_path.exists():
-        template_path = (Path(__file__).parent / "my_template.docx").resolve().absolute()
+        template_path = (Path(__file__).parent / "templates" / "my_template.docx").resolve().absolute()
         
     # 预处理 HTML 表格
     original_content = input_file.read_text(encoding="utf-8")

@@ -23,6 +23,9 @@ dependencies = [
     "torch",
     "aiohttp",
     "requests",
+    "gradio",
+    "numpy",
+    "opencv-python-headless",
 ]
 
 [project.urls]
@@ -34,6 +37,7 @@ test = [
     "pytest",
     "pytest-asyncio",
     "aioresponses",
+    "torchvision",
 ]
 
 [tool.pytest.ini_options]
@@ -43,5 +47,5 @@ norecursedirs = ["scratch", ".agents", "model", "ocr_output", ".gemini", ".claud
 [tool.setuptools.packages.find]
 include = ["glmocr", "pipeline"]
 
-[tool.setuptools]
-py-modules = ["preprocessing", "postprocessing"]
+[tool.setuptools.package-data]
+glmocr = ["templates/*"]

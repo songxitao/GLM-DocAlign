@@ -2,7 +2,6 @@ import os
 import torch
 import asyncio
 from PIL import Image
-from transformers import AutoImageProcessor, AutoModelForObjectDetection
 
 from glmocr.pipeline.deskew import detect_skew_angle, rotate_image
 from glmocr.pipeline.xycut import sort_boxes_by_xy_cut
@@ -24,6 +23,7 @@ class LayoutPredictor:
                 f"   (或者配置系统环境变量 LOCAL_LAYOUT_MODEL 指向您的自定义模型物理路径)\n"
                 f"🔗 ModelScope 权重下载链接: https://modelscope.cn/models/songxitao/PP-DocLayoutV3safetensor\n"
             )
+        from transformers import AutoImageProcessor, AutoModelForObjectDetection
         self.model = AutoModelForObjectDetection.from_pretrained(model_dir).to("cpu")
         self.image_processor = AutoImageProcessor.from_pretrained(model_dir)
 

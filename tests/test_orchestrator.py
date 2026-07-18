@@ -9,41 +9,33 @@ class TestLayoutPredictor(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         from unittest.mock import MagicMock
-        cls.patcher_model = patch('transformers.AutoModelForObjectDetection.from_pretrained')
-        cls.patcher_processor = patch('transformers.AutoImageProcessor.from_pretrained')
+        # 直接 patch LayoutPredictor 的整个 __init__，防止其加载 transformers 导致 CI 环境下报错
+        cls.patcher_init = patch.object(LayoutPredictor, '__init__', return_value=None)
+        cls.patcher_init.start()
         
-        mock_model_from_pretrained = cls.patcher_model.start()
-        mock_processor_from_pretrained = cls.patcher_processor.start()
+        # 实例化 predictor (因 __init__ 被 Mock，是一个不含大模型的纯洁实例)
+        cls.predictor = LayoutPredictor(".")
         
-        # 模拟 model
-        mock_model = MagicMock()
-        mock_model.return_value = MagicMock()
-        mock_model_from_pretrained.return_value = mock_model
+        # 手动装配 predictor 运行所需要的 mock 属性
+        cls.predictor.model = MagicMock()
+        cls.predictor.model.config.id2label = {0: "text"}
         
-        # 模拟 processor
         mock_processor = MagicMock()
-        
         class MockInputs(dict):
             def to(self, device):
                 return self
-                
         mock_inputs = MockInputs(pixel_values=torch.zeros(1, 3, 224, 224))
         mock_processor.return_value = mock_inputs
-        
         mock_processor.post_process_object_detection.return_value = [{
             "scores": torch.tensor([0.95]),
             "labels": torch.tensor([0]),
             "boxes": torch.tensor([[10.0, 10.0, 100.0, 100.0]])
         }]
-        mock_processor_from_pretrained.return_value = mock_processor
-        
-        # 传入物理存在的路径 "." 以通过 os.path.exists 路径检查，模型加载依然由 Mock 拦截
-        cls.predictor = LayoutPredictor(".")
+        cls.predictor.image_processor = mock_processor
 
     @classmethod
     def tearDownClass(cls):
-        cls.patcher_model.stop()
-        cls.patcher_processor.stop()
+        cls.patcher_init.stop()
         cls.predictor = None
         gc.collect()
         if torch.cuda.is_available():

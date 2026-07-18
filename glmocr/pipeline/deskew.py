@@ -13,7 +13,10 @@ def detect_skew_angle(image: Image.Image) -> float:
         
     angles = []
     for line in lines:
-        x1, y1, x2, y2 = line[0]
+        coords = line.squeeze()
+        if coords.size < 4:
+            continue
+        x1, y1, x2, y2 = coords[:4]
         angle = np.arctan2(y2 - y1, x2 - x1) * 180.0 / np.pi
         if -15 < angle < 15:
             angles.append(angle)
